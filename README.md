@@ -1,5 +1,8 @@
 # configdiff
 
+[![CI](https://github.com/nico-perales/configdiff/actions/workflows/ci.yml/badge.svg)](https://github.com/nico-perales/configdiff/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 **Semantic diff for config files.** Compares TOML, YAML, JSON, INI, and dotenv
 (`.env`) by *value and structure*, not by text — so reordered keys and formatting
 differences never show up as changes, and the differences that matter stand out.
