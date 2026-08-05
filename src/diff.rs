@@ -417,11 +417,20 @@ fn scalar_equal(a: &Value, b: &Value, opts: &DiffOptions) -> bool {
                 return false;
             }
             match (numeric_value(a), numeric_value(b)) {
-                (Some(x), Some(y)) => match opts.float_tolerance {
-                    Some(tol) => (x - y).abs() <= tol,
-                    #[allow(clippy::float_cmp)]
-                    None => x == y,
-                },
+                (Some(x), Some(y)) => {
+                    if x.is_nan() || y.is_nan() {
+                        // Two NaNs are treated as equal so a value equals itself;
+                        // a NaN versus a non-NaN is still a real difference.
+                        x.is_nan() && y.is_nan()
+                    } else if let Some(tol) = opts.float_tolerance {
+                        (x - y).abs() <= tol
+                    } else {
+                        #[allow(clippy::float_cmp)]
+                        {
+                            x == y
+                        }
+                    }
+                }
                 _ => false,
             }
         }

@@ -340,6 +340,20 @@ fn deeply_nested_input_is_bounded_not_overflowing() {
 }
 
 #[test]
+fn yaml_nan_equals_itself() {
+    // A `.nan` float compared with itself is not a change (reflexivity), even
+    // though IEEE says NaN != NaN.
+    let a = parse("x: .nan\n", Format::Yaml).unwrap();
+    let d = diff(&a, &a, &DiffOptions::default());
+    assert!(d.is_empty(), "got: {:?}", d.changes());
+
+    // But a NaN versus a real number is still a change.
+    let b = parse("x: 1.0\n", Format::Yaml).unwrap();
+    let d = diff(&a, &b, &DiffOptions::default());
+    assert_eq!(d.len(), 1);
+}
+
+#[test]
 fn large_arrays_fall_back_from_lcs() {
     // Two arrays whose LCS matrix would exceed the cell budget must not allocate
     // it; the diff falls back to positional comparison and still completes.

@@ -24,6 +24,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Exact float round-tripping when parsing JSON (`serde_json`'s `float_roundtrip`),
   so precise numeric values are never silently altered.
 
+### Fixed
+
+- A `.nan` float now compares equal to itself, so diffing a document containing
+  `NaN` against itself no longer reports a phantom change (`NaN` versus a real
+  number is still a difference).
+
 ### Security
 
 - Bounded the diff recursion (depth limit) so pathologically deep input cannot
