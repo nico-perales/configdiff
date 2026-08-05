@@ -13,10 +13,6 @@ const TYPE_CHANGED: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Ma
 const DIM: Style = Style::new().dimmed();
 const BOLD: Style = Style::new().bold();
 
-/// Renders `diff` as a multi-line, human-readable report.
-///
-/// When `color` is `true`, ANSI styling is emitted; pass `false` for plain text
-/// (files, pipes, `NO_COLOR`). A trailing summary line tallies the changes.
 #[must_use]
 pub fn render(diff: &Diff, color: bool) -> String {
     let mut out = String::new();
@@ -107,7 +103,6 @@ fn render_summary(out: &mut String, s: &Summary, color: bool) {
     }
 }
 
-/// Writes `text` styled with `style` when `color`, or plain otherwise.
 fn paint(out: &mut String, style: Style, text: &str, color: bool) {
     if color {
         let _ = write!(out, "{style}{text}{style:#}");

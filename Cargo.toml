@@ -44,15 +44,14 @@ required-features = ["cli"]
 name = "configdiff"
 
 [lints.rust]
-missing_docs = "warn"
 unsafe_code = "forbid"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-# A few pedantic lints are noisy for this kind of code; allow them deliberately.
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 must_use_candidate = "allow"
 
 [profile.release]

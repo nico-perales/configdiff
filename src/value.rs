@@ -1,9 +1,4 @@
-//! The format-agnostic value model that every input is parsed into.
-//!
-//! TOML, YAML, and JSON are all deserialized into a single [`Value`] tree so the
-//! diff engine never has to care which format a document came from. Object key
-//! order is preserved (via [`IndexMap`]) so rendered output can follow the
-//! document's own ordering instead of an arbitrary hash order.
+//! Format-agnostic value model that every input parses into.
 
 use std::fmt;
 
@@ -11,36 +6,20 @@ use indexmap::IndexMap;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
-/// An ordered string-keyed map. Insertion order matches document order.
 pub type Map = IndexMap<String, Value>;
 
-/// A single node in a parsed configuration document.
-///
-/// Numbers are split into [`Value::Integer`] and [`Value::Float`] so the diff
-/// engine can, optionally, treat `1` and `1.0` as different (a type change) or
-/// equal, depending on [`crate::DiffOptions`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    /// A null / nil / absent-but-present value (`null`, `~`, YAML `null`).
     Null,
-    /// A boolean.
     Bool(bool),
-    /// A signed 64-bit integer.
     Integer(i64),
-    /// A 64-bit floating point number. Also used as a fallback for integers
-    /// that do not fit in an `i64` (e.g. large JSON numbers).
     Float(f64),
-    /// A UTF-8 string. TOML datetimes are represented here in RFC 3339 form.
     String(String),
-    /// An ordered sequence of values.
     Array(Vec<Value>),
-    /// An ordered map of string keys to values.
     Object(Map),
 }
 
 impl Value {
-    /// A short human-readable name for this value's type, used in diff output
-    /// (`"string"`, `"integer"`, `"array"`, ...).
     #[must_use]
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -54,13 +33,11 @@ impl Value {
         }
     }
 
-    /// Returns `true` for scalar (non-container) values.
     #[must_use]
     pub fn is_scalar(&self) -> bool {
         !matches!(self, Value::Array(_) | Value::Object(_))
     }
 
-    /// Borrows the inner map if this is an [`Value::Object`].
     #[must_use]
     pub fn as_object(&self) -> Option<&Map> {
         match self {
@@ -69,7 +46,6 @@ impl Value {
         }
     }
 
-    /// Borrows the inner slice if this is an [`Value::Array`].
     #[must_use]
     pub fn as_array(&self) -> Option<&[Value]> {
         match self {
@@ -80,8 +56,6 @@ impl Value {
 }
 
 impl fmt::Display for Value {
-    /// A compact, single-line rendering of a value, suitable for inline diff
-    /// output. Strings are quoted; containers are summarized.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Null => f.write_str("null"),
@@ -118,10 +92,6 @@ impl Serialize for Value {
     }
 }
 
-// The key `toml` uses internally to smuggle datetimes through serde. When a TOML
-// datetime is deserialized into an untyped structure it arrives as a one-entry
-// map with this key and an RFC 3339 string value; we collapse it back to a
-// plain string so datetimes diff sensibly across formats.
 const TOML_DATETIME_KEY: &str = "$__toml_private_datetime";
 
 impl<'de> Deserialize<'de> for Value {
@@ -150,9 +120,6 @@ impl<'de> Visitor<'de> for ValueVisitor {
         Ok(Value::Integer(v))
     }
 
-    // For integers that overflow `i64` we fall back to `f64`. That can lose
-    // precision, but it is the best representation the value model offers for
-    // out-of-range integers, and such values are vanishingly rare in config.
     #[allow(clippy::cast_precision_loss)]
     fn visit_i128<E>(self, v: i128) -> Result<Value, E> {
         Ok(i64::try_from(v).map_or_else(|_| Value::Float(v as f64), Value::Integer))
@@ -218,12 +185,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 }
 
-/// Recursively collapses TOML's datetime sentinel maps into plain strings.
-///
-/// When a TOML datetime is deserialized into this untyped model it arrives as a
-/// one-entry map keyed by [`TOML_DATETIME_KEY`]. This collapse is applied only
-/// after parsing TOML (see [`crate::parse`]) — never for JSON or YAML, so an
-/// ordinary map that happens to use that key is left untouched in those formats.
+// Folds toml's datetime sentinel maps back into plain strings (TOML only).
 pub(crate) fn collapse_toml_datetimes(value: &mut Value) {
     match value {
         Value::Object(map) => {

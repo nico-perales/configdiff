@@ -1,24 +1,9 @@
 //! Machine-readable JSON rendering of a diff.
-//!
-//! The shape is stable and intended for consumption by other tools:
-//!
-//! ```json
-//! {
-//!   "summary": { "added": 1, "removed": 0, "changed": 1, "type_changed": 0, "total": 2 },
-//!   "changes": [
-//!     { "path": "server.port", "kind": "changed", "old": 8080, "new": 9090 },
-//!     { "path": "server.tls", "kind": "added", "new": { "enabled": true } }
-//!   ]
-//! }
-//! ```
 
 use serde_json::{Map, Value as Json, json};
 
 use crate::diff::{Change, ChangeKind, Diff};
 
-/// Renders `diff` as a JSON string.
-///
-/// When `pretty` is `true` the output is indented; otherwise it is compact.
 #[must_use]
 pub fn render(diff: &Diff, pretty: bool) -> String {
     let s = diff.summary();
@@ -72,8 +57,6 @@ fn change_to_json(change: &Change) -> Json {
     Json::Object(obj)
 }
 
-/// Converts a [`crate::Value`] into a `serde_json::Value` via its `Serialize`
-/// impl. Non-finite floats (which JSON cannot represent) become `null`.
 fn to_json(value: &crate::Value) -> Json {
     serde_json::to_value(value).unwrap_or(Json::Null)
 }
