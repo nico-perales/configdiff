@@ -1,9 +1,9 @@
 //! # configdiff
 //!
-//! Semantic diff for configuration files. `configdiff` parses TOML, YAML, and
-//! JSON into a single value model and compares them by **structure and value**,
-//! not by text — so reordered keys and formatting differences are invisible,
-//! and real changes stand out.
+//! Semantic diff for configuration files. `configdiff` parses TOML, YAML, JSON,
+//! INI, and dotenv (`.env`) into a single value model and compares them by
+//! **structure and value**, not by text — so reordered keys and formatting
+//! differences are invisible, and real changes stand out.
 //!
 //! Highlights:
 //!

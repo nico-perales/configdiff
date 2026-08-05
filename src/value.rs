@@ -214,17 +214,35 @@ impl<'de> Visitor<'de> for ValueVisitor {
         while let Some((key, value)) = map.next_entry::<String, Value>()? {
             out.insert(key, value);
         }
+        Ok(Value::Object(out))
+    }
+}
 
-        // A TOML datetime arrives as a one-entry map keyed by the sentinel;
-        // collapse it back into the plain RFC 3339 string it wraps.
-        if out.len() == 1 {
-            if let Some(Value::String(_)) = out.get(TOML_DATETIME_KEY) {
-                if let Some((_, Value::String(s))) = out.swap_remove_index(0) {
-                    return Ok(Value::String(s));
+/// Recursively collapses TOML's datetime sentinel maps into plain strings.
+///
+/// When a TOML datetime is deserialized into this untyped model it arrives as a
+/// one-entry map keyed by [`TOML_DATETIME_KEY`]. This collapse is applied only
+/// after parsing TOML (see [`crate::parse`]) — never for JSON or YAML, so an
+/// ordinary map that happens to use that key is left untouched in those formats.
+pub(crate) fn collapse_toml_datetimes(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if map.len() == 1 {
+                if let Some(Value::String(s)) = map.get(TOML_DATETIME_KEY) {
+                    let s = s.clone();
+                    *value = Value::String(s);
+                    return;
                 }
             }
+            for v in map.values_mut() {
+                collapse_toml_datetimes(v);
+            }
         }
-
-        Ok(Value::Object(out))
+        Value::Array(items) => {
+            for v in items {
+                collapse_toml_datetimes(v);
+            }
+        }
+        _ => {}
     }
 }

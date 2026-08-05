@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 
 use configdiff::render::{json, pretty};
-use configdiff::{ArrayStrategy, DiffOptions, Format, diff, parse_auto};
+use configdiff::{ArrayStrategy, ChangeKind, DiffOptions, Format, diff, parse_auto};
 
 /// Semantic diff for config files (TOML, YAML, JSON).
 ///
@@ -17,6 +17,8 @@ use configdiff::{ArrayStrategy, DiffOptions, Format, diff, parse_auto};
 /// are equal, 1 when they differ, and 2 on error — like `diff(1)`.
 #[derive(Debug, Parser)]
 #[command(name = "configdiff", version, about, long_about = None)]
+// A CLI argument struct with several independent boolean flags is expected.
+#[allow(clippy::struct_excessive_bools)]
 struct Cli {
     /// The original file (use `-` for stdin).
     old: String,
@@ -66,6 +68,17 @@ struct Cli {
     #[arg(long, value_name = "EPSILON")]
     float_tolerance: Option<f64>,
 
+    /// Expand added and removed subtrees, reporting each leaf on its own line
+    /// instead of summarizing the whole subtree.
+    #[arg(long)]
+    expand: bool,
+
+    /// Only exit non-zero when a change of one of these kinds is present
+    /// (repeatable). Without this, any change causes a non-zero exit. All
+    /// changes are still printed regardless.
+    #[arg(long = "fail-on", value_enum, value_name = "KIND")]
+    fail_on: Vec<FailKind>,
+
     /// Suppress output; communicate only through the exit code.
     #[arg(short, long)]
     quiet: bool,
@@ -80,6 +93,8 @@ enum FormatArg {
     Json,
     Toml,
     Yaml,
+    Ini,
+    Env,
 }
 
 impl From<FormatArg> for Format {
@@ -88,7 +103,31 @@ impl From<FormatArg> for Format {
             FormatArg::Json => Format::Json,
             FormatArg::Toml => Format::Toml,
             FormatArg::Yaml => Format::Yaml,
+            FormatArg::Ini => Format::Ini,
+            FormatArg::Env => Format::Dotenv,
         }
+    }
+}
+
+/// A change kind for `--fail-on` gating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum FailKind {
+    Added,
+    Removed,
+    Changed,
+    TypeChanged,
+}
+
+impl FailKind {
+    /// Whether this gate matches a given change.
+    fn matches(self, kind: &ChangeKind) -> bool {
+        matches!(
+            (self, kind),
+            (FailKind::Added, ChangeKind::Added { .. })
+                | (FailKind::Removed, ChangeKind::Removed { .. })
+                | (FailKind::Changed, ChangeKind::Changed { .. })
+                | (FailKind::TypeChanged, ChangeKind::TypeChanged { .. })
+        )
     }
 }
 
@@ -173,7 +212,20 @@ fn run(cli: &Cli) -> Result<bool> {
         }
     }
 
-    Ok(!d.is_empty())
+    Ok(should_fail(&d, &cli.fail_on))
+}
+
+/// Decides whether the run should report a non-zero (differing) exit.
+///
+/// With no `--fail-on` gates, any change counts. With gates, only changes of a
+/// listed kind count.
+fn should_fail(d: &configdiff::Diff, fail_on: &[FailKind]) -> bool {
+    if fail_on.is_empty() {
+        return !d.is_empty();
+    }
+    d.changes()
+        .iter()
+        .any(|c| fail_on.iter().any(|k| k.matches(&c.kind)))
 }
 
 fn build_options(cli: &Cli) -> Result<DiffOptions> {
@@ -189,6 +241,7 @@ fn build_options(cli: &Cli) -> Result<DiffOptions> {
         .float_tolerance(cli.float_tolerance)
         .array_strategy(strategy)
         .array_keys(cli.array_key.clone())
+        .expand(cli.expand)
         .ignore(&cli.ignore)
         .context("invalid --ignore pattern")?;
 

@@ -252,3 +252,68 @@ fn invalid_input_is_a_parse_error() {
     );
     assert!(err.is_err());
 }
+
+#[test]
+fn without_expand_an_added_subtree_is_one_change() {
+    let d = diff_json("{}", r#"{"server":{"host":"h","port":80}}"#);
+    assert_eq!(d.len(), 1);
+    assert_eq!(d.changes()[0].path.to_string(), "server");
+}
+
+#[test]
+fn expand_reports_each_leaf_of_an_added_subtree() {
+    let opts = DiffOptions::default().expand(true);
+    let d = diff(
+        &json("{}"),
+        &json(r#"{"server":{"host":"h","port":80}}"#),
+        &opts,
+    );
+    assert_eq!(d.len(), 2);
+    let paths: Vec<String> = d.changes().iter().map(|c| c.path.to_string()).collect();
+    assert!(paths.contains(&"server.host".to_owned()));
+    assert!(paths.contains(&"server.port".to_owned()));
+    assert_eq!(d.summary().added, 2);
+}
+
+#[test]
+fn expand_reports_each_leaf_of_a_removed_subtree() {
+    let opts = DiffOptions::default().expand(true);
+    let d = diff(
+        &json(r#"{"db":{"name":"prod","port":5432}}"#),
+        &json("{}"),
+        &opts,
+    );
+    assert_eq!(d.summary().removed, 2);
+}
+
+#[test]
+fn ini_sections_become_nested_objects() {
+    let a = parse("[server]\nhost = localhost\nport = 8080\n", Format::Ini).unwrap();
+    let b = parse("[server]\nhost = 0.0.0.0\nport = 8080\n", Format::Ini).unwrap();
+    let d = diff(&a, &b, &DiffOptions::default());
+    assert_eq!(d.len(), 1);
+    assert_eq!(d.changes()[0].path.to_string(), "server.host");
+}
+
+#[test]
+fn dotenv_ignores_comments_and_quotes() {
+    // Comments, an `export` prefix, and quoting should not affect the parsed
+    // values, so these two documents are equal.
+    let a = parse(
+        "# a comment\nA=1\nexport B=\"two\"\n\nC='three'\n",
+        Format::Dotenv,
+    )
+    .unwrap();
+    let b = parse("A=1\nB=two\nC=three\n", Format::Dotenv).unwrap();
+    let d = diff(&a, &b, &DiffOptions::default());
+    assert!(d.is_empty(), "got: {:?}", d.changes());
+}
+
+#[test]
+fn dotenv_values_are_strings() {
+    // `.env` has no types: everything is a string, so `8080` here is "8080".
+    let env = parse("PORT=8080\n", Format::Dotenv).unwrap();
+    let json_int = json(r#"{"PORT":8080}"#);
+    let d = diff(&env, &json_int, &DiffOptions::default());
+    assert_eq!(d.summary().type_changed, 1);
+}

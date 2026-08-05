@@ -4,7 +4,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::error::Error;
-use crate::value::Value;
+use crate::value::{Map, Value};
 
 /// A supported configuration format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +15,11 @@ pub enum Format {
     Toml,
     /// YAML.
     Yaml,
+    /// INI. All values parse as strings; `[section]` blocks become nested
+    /// objects and section-less keys sit at the top level.
+    Ini,
+    /// dotenv (`.env`). A flat set of `KEY=VALUE` pairs; all values are strings.
+    Dotenv,
 }
 
 impl Format {
@@ -25,13 +30,22 @@ impl Format {
             "json" => Some(Format::Json),
             "toml" => Some(Format::Toml),
             "yaml" | "yml" => Some(Format::Yaml),
+            "ini" => Some(Format::Ini),
+            "env" => Some(Format::Dotenv),
             _ => None,
         }
     }
 
-    /// Infers a format from a path's extension, if recognized.
+    /// Infers a format from a path's extension or well-known filename.
     #[must_use]
     pub fn from_path(path: &Path) -> Option<Format> {
+        // A file literally named `.env` (or `.env.local`, ...) has no extension
+        // as far as the OS is concerned, so match on the file name too.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name == ".env" || name.starts_with(".env.") {
+                return Some(Format::Dotenv);
+            }
+        }
         path.extension()
             .and_then(|e| e.to_str())
             .and_then(Format::from_extension)
@@ -63,6 +77,8 @@ impl Format {
             Format::Json => "json",
             Format::Toml => "toml",
             Format::Yaml => "yaml",
+            Format::Ini => "ini",
+            Format::Dotenv => "env",
         }
     }
 }
@@ -88,9 +104,81 @@ impl std::fmt::Display for Format {
 pub fn parse(content: &str, format: Format) -> Result<Value, Error> {
     match format {
         Format::Json => Ok(serde_json::from_str(content)?),
-        Format::Toml => Ok(toml::from_str(content)?),
+        Format::Toml => {
+            let mut value = toml::from_str(content)?;
+            // TOML datetimes deserialize into a sentinel map; fold them back
+            // into plain RFC 3339 strings. This is TOML-specific on purpose.
+            crate::value::collapse_toml_datetimes(&mut value);
+            Ok(value)
+        }
         Format::Yaml => Ok(serde_norway::from_str(content)?),
+        Format::Ini => parse_ini(content),
+        Format::Dotenv => Ok(parse_dotenv(content)),
     }
+}
+
+/// Parses INI text into a nested object. Section-less keys live at the top
+/// level; each `[section]` becomes a nested object. All values are strings.
+fn parse_ini(content: &str) -> Result<Value, Error> {
+    let ini = ini::Ini::load_from_str(content)?;
+    let mut root = Map::new();
+    for (section, properties) in &ini {
+        let mut table = Map::new();
+        for (key, value) in properties {
+            table.insert(key.to_owned(), Value::String(value.to_owned()));
+        }
+        match section {
+            // The default (section-less) properties go straight to the root.
+            None => {
+                for (k, v) in table {
+                    root.insert(k, v);
+                }
+            }
+            Some(name) => {
+                root.insert(name.to_owned(), Value::Object(table));
+            }
+        }
+    }
+    Ok(Value::Object(root))
+}
+
+/// Parses dotenv (`.env`) text into a flat object of string values.
+///
+/// Recognizes `KEY=VALUE` lines, an optional leading `export `, `#` comments,
+/// and single- or double-quoted values (quotes are stripped). This covers the
+/// common cases without pulling in a full dotenv runtime.
+fn parse_dotenv(content: &str) -> Value {
+    let mut map = Map::new();
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = strip_dotenv_quotes(value.trim());
+        map.insert(key.to_owned(), Value::String(value));
+    }
+    Value::Object(map)
+}
+
+/// Strips a single matching pair of surrounding quotes from a dotenv value.
+fn strip_dotenv_quotes(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' || first == b'\'') && first == last {
+            return value[1..value.len() - 1].to_owned();
+        }
+    }
+    value.to_owned()
 }
 
 /// Parses `content`, inferring the format from `hint` (an extension or format

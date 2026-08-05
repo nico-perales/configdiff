@@ -1,8 +1,8 @@
 # configdiff
 
-**Semantic diff for config files.** Compares TOML, YAML, and JSON by *value and
-structure*, not by text — so reordered keys and formatting differences never show
-up as changes, and the differences that matter stand out.
+**Semantic diff for config files.** Compares TOML, YAML, JSON, INI, and dotenv
+(`.env`) by *value and structure*, not by text — so reordered keys and formatting
+differences never show up as changes, and the differences that matter stand out.
 
 ```text
 $ configdiff old.toml new.yaml --array-key id
@@ -77,13 +77,33 @@ configdiff a.toml b.toml -o json
 
 # Use in a script: exit code tells you if anything changed
 configdiff a.toml b.toml --quiet && echo "no drift"
+
+# CI drift gate: only fail the build on removals or type changes
+configdiff baseline.toml deployed.toml --fail-on removed --fail-on type-changed
+
+# Expand added/removed subtrees to see every leaf, not just "{3 keys}"
+configdiff a.json b.json --expand
 ```
+
+### Supported formats
+
+| Format | Extensions | Notes |
+| --- | --- | --- |
+| JSON | `.json` | |
+| TOML | `.toml` | Datetimes compare as RFC 3339 strings. |
+| YAML | `.yaml`, `.yml` | |
+| INI | `.ini` | `[section]` blocks become nested objects; all values are strings. |
+| dotenv | `.env`, `.env.*` | Flat `KEY=VALUE` pairs; all values are strings. |
+
+Because INI and dotenv have no types, their values are always strings — comparing
+`.env`'s `PORT=8080` against JSON's `"port": 8080` reports a type change, which is
+usually what you want.
 
 ### Options
 
 | Option | Description |
 | --- | --- |
-| `-f, --format <FMT>` | Force the format of both inputs (`json`, `toml`, `yaml`). |
+| `-f, --format <FMT>` | Force the format of both inputs (`json`, `toml`, `yaml`, `ini`, `env`). |
 | `--old-format`, `--new-format` | Force one side's format (overrides `--format`). |
 | `-o, --output <FMT>` | `pretty` (default) or `json`. |
 | `--color <WHEN>` | `auto` (default), `always`, or `never`. Honors `NO_COLOR`. |
@@ -92,6 +112,8 @@ configdiff a.toml b.toml --quiet && echo "no drift"
 | `--array-key <KEY>` | Key field for matching array elements (repeatable). Implies `--array keyed`. |
 | `--loose-numbers` | Treat `1` and `1.0` as equal. |
 | `--float-tolerance <EPS>` | Consider floats within `EPS` equal. |
+| `--expand` | Report each leaf of an added/removed subtree instead of summarizing it. |
+| `--fail-on <KIND>` | Only exit non-zero on these change kinds (repeatable): `added`, `removed`, `changed`, `type-changed`. |
 | `-q, --quiet` | No output; communicate only via the exit code. |
 | `--exit-zero` | Always exit `0`, even when the documents differ. |
 
@@ -104,6 +126,9 @@ Like `diff(1)`:
 | `0` | The documents are semantically equal. |
 | `1` | They differ. |
 | `2` | An error occurred (bad input, unknown format, ...). |
+
+`--fail-on` narrows what counts as "differ" for the exit code (e.g. fail only on
+removals), while still printing every change. `--exit-zero` forces `0` regardless.
 
 ### Ignore patterns
 

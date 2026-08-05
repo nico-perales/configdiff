@@ -43,6 +43,9 @@ pub struct DiffOptions {
     /// Key fields used by [`ArrayStrategy::Keyed`] to match object elements,
     /// tried in order (first key present on both sides wins).
     pub array_keys: Vec<String>,
+    /// When an entire subtree is added or removed, report every leaf inside it
+    /// as its own change instead of a single change carrying the whole subtree.
+    pub expand: bool,
 }
 
 impl DiffOptions {
@@ -71,6 +74,13 @@ impl DiffOptions {
     #[must_use]
     pub fn array_keys(mut self, keys: Vec<String>) -> Self {
         self.array_keys = keys;
+        self
+    }
+
+    /// Enables leaf-level expansion of added and removed subtrees.
+    #[must_use]
+    pub fn expand(mut self, yes: bool) -> Self {
+        self.expand = yes;
         self
     }
 

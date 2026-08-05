@@ -126,3 +126,52 @@ fn json_output_is_machine_readable() {
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid json output");
     assert_eq!(parsed["summary"]["total"], 1);
 }
+
+#[test]
+fn fail_on_removed_ignores_a_pure_addition() {
+    let a = temp_file("fo1_a.json", r#"{"a":1}"#);
+    let b = temp_file("fo1_b.json", r#"{"a":1,"c":3}"#);
+    // A key was added, but we only fail on removals: exit 0.
+    let out = bin()
+        .arg(&a)
+        .arg(&b)
+        .arg("--fail-on")
+        .arg("removed")
+        .arg("--color")
+        .arg("never")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    // The change is still printed even though it does not trigger failure.
+    assert!(String::from_utf8_lossy(&out.stdout).contains('c'));
+}
+
+#[test]
+fn fail_on_matches_a_relevant_change() {
+    let a = temp_file("fo2_a.json", r#"{"a":1,"b":2}"#);
+    let b = temp_file("fo2_b.json", r#"{"a":1}"#);
+    // `b` was removed and we fail on removals: exit 1.
+    let status = bin()
+        .arg(&a)
+        .arg(&b)
+        .arg("--fail-on")
+        .arg("removed")
+        .arg("--quiet")
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+}
+
+#[test]
+fn ini_and_env_formats_are_supported() {
+    let a = temp_file("ie_a.ini", "[s]\nk = old\n");
+    let b = temp_file("ie_b.ini", "[s]\nk = new\n");
+    let status = bin()
+        .arg(&a)
+        .arg(&b)
+        .arg("--color")
+        .arg("never")
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+}

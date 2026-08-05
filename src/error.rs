@@ -23,6 +23,10 @@ pub enum Error {
     #[error("YAML parse error: {0}")]
     Yaml(#[from] serde_norway::Error),
 
+    /// Failed to parse a document as INI.
+    #[error("INI parse error: {0}")]
+    Ini(#[from] ini::ParseError),
+
     /// An ignore glob pattern was invalid.
     #[error("invalid ignore pattern: {0}")]
     Glob(#[from] globset::Error),

@@ -152,6 +152,63 @@ fn diff_values(old: &Value, new: &Value, path: &Path, opts: &DiffOptions, out: &
     }
 }
 
+/// Records an added value at `path`, honoring ignore globs. With `opts.expand`,
+/// a non-empty container is descended so each leaf is recorded on its own.
+fn emit_added(value: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+    if opts.is_ignored(&path.match_string()) {
+        return;
+    }
+    if opts.expand {
+        match value {
+            Value::Object(m) if !m.is_empty() => {
+                for (k, v) in m {
+                    emit_added(v, &path.child_key(k.clone()), opts, out);
+                }
+                return;
+            }
+            Value::Array(a) if !a.is_empty() => {
+                for (i, v) in a.iter().enumerate() {
+                    emit_added(v, &path.child_index(i), opts, out);
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+    out.push(Change {
+        path: path.clone(),
+        kind: ChangeKind::Added { new: value.clone() },
+    });
+}
+
+/// Records a removed value at `path`. The removal-side mirror of [`emit_added`].
+fn emit_removed(value: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+    if opts.is_ignored(&path.match_string()) {
+        return;
+    }
+    if opts.expand {
+        match value {
+            Value::Object(m) if !m.is_empty() => {
+                for (k, v) in m {
+                    emit_removed(v, &path.child_key(k.clone()), opts, out);
+                }
+                return;
+            }
+            Value::Array(a) if !a.is_empty() => {
+                for (i, v) in a.iter().enumerate() {
+                    emit_removed(v, &path.child_index(i), opts, out);
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+    out.push(Change {
+        path: path.clone(),
+        kind: ChangeKind::Removed { old: value.clone() },
+    });
+}
+
 fn diff_objects(
     a: &crate::value::Map,
     b: &crate::value::Map,
@@ -159,29 +216,19 @@ fn diff_objects(
     opts: &DiffOptions,
     out: &mut Vec<Change>,
 ) {
-    // Keys present in `a`: recurse into shared keys, report removals.
+    // Keys present in `a`: recurse into shared keys, report removals. Ignore
+    // handling lives in `diff_values` and `emit_removed`.
     for (key, av) in a {
         let child = path.child_key(key.clone());
-        if !opts.is_ignored(&child.match_string()) {
-            match b.get(key) {
-                Some(bv) => diff_values(av, bv, &child, opts, out),
-                None => out.push(Change {
-                    path: child,
-                    kind: ChangeKind::Removed { old: av.clone() },
-                }),
-            }
+        match b.get(key) {
+            Some(bv) => diff_values(av, bv, &child, opts, out),
+            None => emit_removed(av, &child, opts, out),
         }
     }
     // Keys only in `b`: additions, in `b`'s order.
     for (key, bv) in b {
         if !a.contains_key(key) {
-            let child = path.child_key(key.clone());
-            if !opts.is_ignored(&child.match_string()) {
-                out.push(Change {
-                    path: child,
-                    kind: ChangeKind::Added { new: bv.clone() },
-                });
-            }
+            emit_added(bv, &path.child_key(key.clone()), opts, out);
         }
     }
 }
@@ -212,16 +259,10 @@ fn diff_arrays_positional(
         diff_values(&a[i], &b[i], &path.child_index(i), opts, out);
     }
     for (i, av) in a.iter().enumerate().skip(common) {
-        out.push(Change {
-            path: path.child_index(i),
-            kind: ChangeKind::Removed { old: av.clone() },
-        });
+        emit_removed(av, &path.child_index(i), opts, out);
     }
     for (i, bv) in b.iter().enumerate().skip(common) {
-        out.push(Change {
-            path: path.child_index(i),
-            kind: ChangeKind::Added { new: bv.clone() },
-        });
+        emit_added(bv, &path.child_index(i), opts, out);
     }
 }
 
@@ -257,31 +298,19 @@ fn diff_arrays_lcs(
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
-            out.push(Change {
-                path: path.child_index(i),
-                kind: ChangeKind::Removed { old: a[i].clone() },
-            });
+            emit_removed(&a[i], &path.child_index(i), opts, out);
             i += 1;
         } else {
-            out.push(Change {
-                path: path.child_index(j),
-                kind: ChangeKind::Added { new: b[j].clone() },
-            });
+            emit_added(&b[j], &path.child_index(j), opts, out);
             j += 1;
         }
     }
     while i < n {
-        out.push(Change {
-            path: path.child_index(i),
-            kind: ChangeKind::Removed { old: a[i].clone() },
-        });
+        emit_removed(&a[i], &path.child_index(i), opts, out);
         i += 1;
     }
     while j < m {
-        out.push(Change {
-            path: path.child_index(j),
-            kind: ChangeKind::Added { new: b[j].clone() },
-        });
+        emit_added(&b[j], &path.child_index(j), opts, out);
         j += 1;
     }
 }
@@ -317,16 +346,10 @@ fn diff_arrays_keyed(
                         let new_idx = *new_idx;
                         diff_values(av, &b[new_idx], &path.child_index(i), opts, out);
                     }
-                    None => out.push(Change {
-                        path: path.child_index(i),
-                        kind: ChangeKind::Removed { old: av.clone() },
-                    }),
+                    None => emit_removed(av, &path.child_index(i), opts, out),
                 }
             }
-            None => out.push(Change {
-                path: path.child_index(i),
-                kind: ChangeKind::Removed { old: av.clone() },
-            }),
+            None => emit_removed(av, &path.child_index(i), opts, out),
         }
     }
 
@@ -341,10 +364,7 @@ fn diff_arrays_keyed(
     for (j, bv) in b.iter().enumerate() {
         let is_keyed_and_consumed = consumed.remove(&j);
         if !is_keyed_and_consumed {
-            out.push(Change {
-                path: path.child_index(j),
-                kind: ChangeKind::Added { new: bv.clone() },
-            });
+            emit_added(bv, &path.child_index(j), opts, out);
         }
     }
 }
