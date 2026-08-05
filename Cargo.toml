@@ -1,0 +1,59 @@
+[package]
+name = "configdiff"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Semantic diff for config files (TOML, YAML, JSON) — compares values and structure, not text. Cross-format, type-aware, with smart array diffing."
+authors = ["nico159756 <peralesnico74@gmail.com>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/nico159756/configdiff"
+homepage = "https://github.com/nico159756/configdiff"
+documentation = "https://docs.rs/configdiff"
+keywords = ["diff", "config", "toml", "yaml", "json"]
+categories = ["command-line-utilities", "config", "development-tools"]
+exclude = ["/.github", "/tests/snapshots", "/.gitignore"]
+
+[features]
+default = ["cli"]
+# The `cli` feature pulls in everything needed for the `configdiff` binary.
+# Library-only consumers can depend on this crate with `default-features = false`
+# and avoid clap / anyhow entirely.
+cli = ["dep:clap", "dep:anyhow"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_norway = "0.9.42"
+toml = "1.1.4"
+indexmap = { version = "2.14.0", features = ["serde"] }
+globset = "0.4.20"
+thiserror = "2.0.19"
+anstyle = "1.0.14"
+
+# CLI-only dependencies, gated behind the `cli` feature.
+clap = { version = "4.6.5", features = ["derive"], optional = true }
+anyhow = { version = "1.0.104", optional = true }
+
+[[bin]]
+name = "configdiff"
+required-features = ["cli"]
+
+[lib]
+name = "configdiff"
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# A few pedantic lints are noisy for this kind of code; allow them deliberately.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+lto = true
+strip = true
