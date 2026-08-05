@@ -191,6 +191,23 @@ object keys preserved), so the diff engine never has to care which format a
 document came from. That single decision is what makes cross-format diffing,
 type-awareness, and consistent output fall out naturally.
 
+## Security & limits
+
+`configdiff` reads only the inputs you give it and writes only to stdout/stderr —
+no network, no telemetry. Still, if you point it at **untrusted** documents (e.g.
+diffing config from an unknown source, or embedding the library in a service),
+keep these bounds in mind:
+
+- **Recursion is depth-limited.** Extremely deep input cannot overflow the stack;
+  nodes past the limit report a single truncation marker instead of recursing.
+- **Array diffing is memory-bounded.** Very large arrays skip the LCS matrix and
+  fall back to positional comparison, so two huge lists cannot exhaust memory.
+- **Parser depth for untrusted YAML/TOML** is governed by the underlying parser,
+  not by `configdiff`. When processing untrusted input in a service, run it under
+  an external resource limit (memory/CPU) as defense in depth.
+- **Values are printed in full**, including secrets from `.env`/config files. Do
+  not pipe the diff of secret-bearing files into logs you don't control.
+
 ## License
 
 Licensed under either of

@@ -317,3 +317,38 @@ fn dotenv_values_are_strings() {
     let d = diff(&env, &json_int, &DiffOptions::default());
     assert_eq!(d.summary().type_changed, 1);
 }
+
+fn nested_object(depth: usize) -> Value {
+    let mut v = Value::Integer(0);
+    for _ in 0..depth {
+        let mut m = configdiff::Map::new();
+        m.insert("a".to_owned(), v);
+        v = Value::Object(m);
+    }
+    v
+}
+
+#[test]
+fn deeply_nested_input_is_bounded_not_overflowing() {
+    // A structure deeper than the internal recursion limit must not overflow the
+    // stack. The diff terminates and reports a single bounded marker change at
+    // the depth limit instead of recursing without end.
+    let deep = nested_object(300);
+    let d = diff(&deep, &deep, &DiffOptions::default());
+    assert_eq!(d.len(), 1);
+    assert!(matches!(d.changes()[0].kind, ChangeKind::Changed { .. }));
+}
+
+#[test]
+fn large_arrays_fall_back_from_lcs() {
+    // Two arrays whose LCS matrix would exceed the cell budget must not allocate
+    // it; the diff falls back to positional comparison and still completes.
+    let a: Vec<Value> = (0..3000i64).map(Value::Integer).collect();
+    let mut b = a.clone();
+    b[0] = Value::Integer(999_999);
+    let d = diff(&Value::Array(a), &Value::Array(b), &DiffOptions::default());
+    // Positional fallback reports the single edited element (LCS would report a
+    // removal plus an addition), proving the fallback engaged.
+    assert_eq!(d.len(), 1);
+    assert!(matches!(d.changes()[0].kind, ChangeKind::Changed { .. }));
+}

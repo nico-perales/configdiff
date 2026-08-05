@@ -187,6 +187,16 @@ impl<'de> Visitor<'de> for ValueVisitor {
 
 // Folds toml's datetime sentinel maps back into plain strings (TOML only).
 pub(crate) fn collapse_toml_datetimes(value: &mut Value) {
+    collapse_rec(value, 0);
+}
+
+// Depth-bounded so deeply nested TOML cannot overflow the stack here.
+const COLLAPSE_MAX_DEPTH: usize = 128;
+
+fn collapse_rec(value: &mut Value, depth: usize) {
+    if depth >= COLLAPSE_MAX_DEPTH {
+        return;
+    }
     match value {
         Value::Object(map) => {
             if map.len() == 1 {
@@ -197,12 +207,12 @@ pub(crate) fn collapse_toml_datetimes(value: &mut Value) {
                 }
             }
             for v in map.values_mut() {
-                collapse_toml_datetimes(v);
+                collapse_rec(v, depth + 1);
             }
         }
         Value::Array(items) => {
             for v in items {
-                collapse_toml_datetimes(v);
+                collapse_rec(v, depth + 1);
             }
         }
         _ => {}

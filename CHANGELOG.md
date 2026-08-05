@@ -24,4 +24,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Exact float round-tripping when parsing JSON (`serde_json`'s `float_roundtrip`),
   so precise numeric values are never silently altered.
 
+### Security
+
+- Bounded the diff recursion (depth limit) so pathologically deep input cannot
+  overflow the stack; overly deep nodes report a single truncation marker.
+- Capped the LCS array-diff matrix, falling back to positional comparison for very
+  large arrays so two huge lists cannot exhaust memory.
+- Added a `cargo audit` job to CI to catch dependency advisories.
+
 [Unreleased]: https://github.com/nico159756/configdiff/commits/main

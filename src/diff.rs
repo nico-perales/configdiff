@@ -4,6 +4,15 @@ use crate::options::{ArrayStrategy, DiffOptions};
 use crate::path::Path;
 use crate::value::Value;
 
+// Hard recursion limit: bounds the diff so pathologically deep input cannot
+// overflow the stack. Matches serde_json's default parse-depth limit.
+const MAX_DEPTH: usize = 128;
+const TRUNCATED: &str = "<max depth reached>";
+
+// Upper bound on the LCS dynamic-programming matrix; above it, array diffing
+// falls back to positional so two huge arrays cannot exhaust memory.
+const LCS_MAX_CELLS: usize = 4_000_000;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeKind {
     Added { new: Value },
@@ -70,18 +79,37 @@ impl Diff {
 #[must_use]
 pub fn diff(old: &Value, new: &Value, opts: &DiffOptions) -> Diff {
     let mut changes = Vec::new();
-    diff_values(old, new, &Path::root(), opts, &mut changes);
+    diff_values(old, new, &Path::root(), 0, opts, &mut changes);
     Diff { changes }
 }
 
-fn diff_values(old: &Value, new: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+fn diff_values(
+    old: &Value,
+    new: &Value,
+    path: &Path,
+    depth: usize,
+    opts: &DiffOptions,
+    out: &mut Vec<Change>,
+) {
     if !path.is_root() && opts.is_ignored(&path.match_string()) {
         return;
     }
 
+    // Too deep to compare safely: report a bounded, non-recursing marker.
+    if depth >= MAX_DEPTH {
+        out.push(Change {
+            path: path.clone(),
+            kind: ChangeKind::Changed {
+                old: Value::String(TRUNCATED.to_owned()),
+                new: Value::String(TRUNCATED.to_owned()),
+            },
+        });
+        return;
+    }
+
     match (old, new) {
-        (Value::Object(a), Value::Object(b)) => diff_objects(a, b, path, opts, out),
-        (Value::Array(a), Value::Array(b)) => diff_arrays(a, b, path, opts, out),
+        (Value::Object(a), Value::Object(b)) => diff_objects(a, b, path, depth, opts, out),
+        (Value::Array(a), Value::Array(b)) => diff_arrays(a, b, path, depth, opts, out),
         (a, b) if a.is_scalar() && b.is_scalar() => match scalar_relation(a, b, opts) {
             ScalarRel::Equal => {}
             ScalarRel::Changed => out.push(Change {
@@ -110,21 +138,21 @@ fn diff_values(old: &Value, new: &Value, path: &Path, opts: &DiffOptions, out: &
 }
 
 // Records an addition, expanding subtrees leaf-by-leaf when opts.expand is set.
-fn emit_added(value: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+fn emit_added(value: &Value, path: &Path, depth: usize, opts: &DiffOptions, out: &mut Vec<Change>) {
     if opts.is_ignored(&path.match_string()) {
         return;
     }
-    if opts.expand {
+    if opts.expand && depth < MAX_DEPTH {
         match value {
             Value::Object(m) if !m.is_empty() => {
                 for (k, v) in m {
-                    emit_added(v, &path.child_key(k.clone()), opts, out);
+                    emit_added(v, &path.child_key(k.clone()), depth + 1, opts, out);
                 }
                 return;
             }
             Value::Array(a) if !a.is_empty() => {
                 for (i, v) in a.iter().enumerate() {
-                    emit_added(v, &path.child_index(i), opts, out);
+                    emit_added(v, &path.child_index(i), depth + 1, opts, out);
                 }
                 return;
             }
@@ -138,21 +166,27 @@ fn emit_added(value: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Chan
 }
 
 // Removal-side mirror of emit_added.
-fn emit_removed(value: &Value, path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+fn emit_removed(
+    value: &Value,
+    path: &Path,
+    depth: usize,
+    opts: &DiffOptions,
+    out: &mut Vec<Change>,
+) {
     if opts.is_ignored(&path.match_string()) {
         return;
     }
-    if opts.expand {
+    if opts.expand && depth < MAX_DEPTH {
         match value {
             Value::Object(m) if !m.is_empty() => {
                 for (k, v) in m {
-                    emit_removed(v, &path.child_key(k.clone()), opts, out);
+                    emit_removed(v, &path.child_key(k.clone()), depth + 1, opts, out);
                 }
                 return;
             }
             Value::Array(a) if !a.is_empty() => {
                 for (i, v) in a.iter().enumerate() {
-                    emit_removed(v, &path.child_index(i), opts, out);
+                    emit_removed(v, &path.child_index(i), depth + 1, opts, out);
                 }
                 return;
             }
@@ -169,32 +203,40 @@ fn diff_objects(
     a: &crate::value::Map,
     b: &crate::value::Map,
     path: &Path,
+    depth: usize,
     opts: &DiffOptions,
     out: &mut Vec<Change>,
 ) {
     for (key, av) in a {
         let child = path.child_key(key.clone());
         match b.get(key) {
-            Some(bv) => diff_values(av, bv, &child, opts, out),
-            None => emit_removed(av, &child, opts, out),
+            Some(bv) => diff_values(av, bv, &child, depth + 1, opts, out),
+            None => emit_removed(av, &child, depth + 1, opts, out),
         }
     }
     for (key, bv) in b {
         if !a.contains_key(key) {
-            emit_added(bv, &path.child_key(key.clone()), opts, out);
+            emit_added(bv, &path.child_key(key.clone()), depth + 1, opts, out);
         }
     }
 }
 
-fn diff_arrays(a: &[Value], b: &[Value], path: &Path, opts: &DiffOptions, out: &mut Vec<Change>) {
+fn diff_arrays(
+    a: &[Value],
+    b: &[Value],
+    path: &Path,
+    depth: usize,
+    opts: &DiffOptions,
+    out: &mut Vec<Change>,
+) {
     match opts.array_strategy {
-        ArrayStrategy::Positional => diff_arrays_positional(a, b, path, opts, out),
-        ArrayStrategy::Lcs => diff_arrays_lcs(a, b, path, opts, out),
+        ArrayStrategy::Positional => diff_arrays_positional(a, b, path, depth, opts, out),
+        ArrayStrategy::Lcs => diff_arrays_lcs(a, b, path, depth, opts, out),
         ArrayStrategy::Keyed => {
             if opts.array_keys.is_empty() {
-                diff_arrays_lcs(a, b, path, opts, out);
+                diff_arrays_lcs(a, b, path, depth, opts, out);
             } else {
-                diff_arrays_keyed(a, b, path, opts, out);
+                diff_arrays_keyed(a, b, path, depth, opts, out);
             }
         }
     }
@@ -204,36 +246,44 @@ fn diff_arrays_positional(
     a: &[Value],
     b: &[Value],
     path: &Path,
+    depth: usize,
     opts: &DiffOptions,
     out: &mut Vec<Change>,
 ) {
     let common = a.len().min(b.len());
     for i in 0..common {
-        diff_values(&a[i], &b[i], &path.child_index(i), opts, out);
+        diff_values(&a[i], &b[i], &path.child_index(i), depth + 1, opts, out);
     }
     for (i, av) in a.iter().enumerate().skip(common) {
-        emit_removed(av, &path.child_index(i), opts, out);
+        emit_removed(av, &path.child_index(i), depth + 1, opts, out);
     }
     for (i, bv) in b.iter().enumerate().skip(common) {
-        emit_added(bv, &path.child_index(i), opts, out);
+        emit_added(bv, &path.child_index(i), depth + 1, opts, out);
     }
 }
 
 // LCS-based array diff: anchors equal elements, reports the rest as add/remove.
+// Falls back to positional when the DP matrix would be too large.
 #[allow(clippy::many_single_char_names)]
 fn diff_arrays_lcs(
     a: &[Value],
     b: &[Value],
     path: &Path,
+    depth: usize,
     opts: &DiffOptions,
     out: &mut Vec<Change>,
 ) {
     let n = a.len();
     let m = b.len();
+    if n.saturating_mul(m) > LCS_MAX_CELLS {
+        diff_arrays_positional(a, b, path, depth, opts, out);
+        return;
+    }
+
     let mut dp = vec![vec![0usize; m + 1]; n + 1];
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            dp[i][j] = if deep_equal(&a[i], &b[j], opts) {
+            dp[i][j] = if deep_equal(&a[i], &b[j], 0, opts) {
                 dp[i + 1][j + 1] + 1
             } else {
                 dp[i + 1][j].max(dp[i][j + 1])
@@ -243,23 +293,23 @@ fn diff_arrays_lcs(
 
     let (mut i, mut j) = (0, 0);
     while i < n && j < m {
-        if deep_equal(&a[i], &b[j], opts) {
+        if deep_equal(&a[i], &b[j], 0, opts) {
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
-            emit_removed(&a[i], &path.child_index(i), opts, out);
+            emit_removed(&a[i], &path.child_index(i), depth + 1, opts, out);
             i += 1;
         } else {
-            emit_added(&b[j], &path.child_index(j), opts, out);
+            emit_added(&b[j], &path.child_index(j), depth + 1, opts, out);
             j += 1;
         }
     }
     while i < n {
-        emit_removed(&a[i], &path.child_index(i), opts, out);
+        emit_removed(&a[i], &path.child_index(i), depth + 1, opts, out);
         i += 1;
     }
     while j < m {
-        emit_added(&b[j], &path.child_index(j), opts, out);
+        emit_added(&b[j], &path.child_index(j), depth + 1, opts, out);
         j += 1;
     }
 }
@@ -269,6 +319,7 @@ fn diff_arrays_keyed(
     a: &[Value],
     b: &[Value],
     path: &Path,
+    depth: usize,
     opts: &DiffOptions,
     out: &mut Vec<Change>,
 ) {
@@ -288,12 +339,12 @@ fn diff_arrays_keyed(
                     Some((_, new_idx, used)) => {
                         *used = true;
                         let new_idx = *new_idx;
-                        diff_values(av, &b[new_idx], &path.child_index(i), opts, out);
+                        diff_values(av, &b[new_idx], &path.child_index(i), depth + 1, opts, out);
                     }
-                    None => emit_removed(av, &path.child_index(i), opts, out),
+                    None => emit_removed(av, &path.child_index(i), depth + 1, opts, out),
                 }
             }
-            None => emit_removed(av, &path.child_index(i), opts, out),
+            None => emit_removed(av, &path.child_index(i), depth + 1, opts, out),
         }
     }
 
@@ -307,7 +358,7 @@ fn diff_arrays_keyed(
     for (j, bv) in b.iter().enumerate() {
         let is_keyed_and_consumed = consumed.remove(&j);
         if !is_keyed_and_consumed {
-            emit_added(bv, &path.child_index(j), opts, out);
+            emit_added(bv, &path.child_index(j), depth + 1, opts, out);
         }
     }
 }
@@ -378,18 +429,25 @@ fn scalar_equal(a: &Value, b: &Value, opts: &DiffOptions) -> bool {
     }
 }
 
-fn deep_equal(a: &Value, b: &Value, opts: &DiffOptions) -> bool {
+// Bounded structural equality; past MAX_DEPTH it reports "not equal" rather than
+// recursing further, so it cannot overflow on pathologically deep values.
+fn deep_equal(a: &Value, b: &Value, depth: usize, opts: &DiffOptions) -> bool {
+    if depth >= MAX_DEPTH {
+        return false;
+    }
     match (a, b) {
         (Value::Object(x), Value::Object(y)) => {
             x.len() == y.len()
-                && x.iter()
-                    .all(|(k, xv)| y.get(k).is_some_and(|yv| deep_equal(xv, yv, opts)))
+                && x.iter().all(|(k, xv)| {
+                    y.get(k)
+                        .is_some_and(|yv| deep_equal(xv, yv, depth + 1, opts))
+                })
         }
         (Value::Array(x), Value::Array(y)) => {
             x.len() == y.len()
                 && x.iter()
                     .zip(y.iter())
-                    .all(|(xv, yv)| deep_equal(xv, yv, opts))
+                    .all(|(xv, yv)| deep_equal(xv, yv, depth + 1, opts))
         }
         _ if a.is_scalar() && b.is_scalar() => scalar_equal(a, b, opts),
         _ => false,
