@@ -6,7 +6,7 @@ feature ideas, docs, and code.
 ## Getting started
 
 ```bash
-git clone https://github.com/nico159756/configdiff
+git clone https://github.com/nico-perales/configdiff
 cd configdiff
 cargo test
 ```

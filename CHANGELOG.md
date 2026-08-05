@@ -38,4 +38,4 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   large arrays so two huge lists cannot exhaust memory.
 - Added a `cargo audit` job to CI to catch dependency advisories.
 
-[Unreleased]: https://github.com/nico159756/configdiff/commits/main
+[Unreleased]: https://github.com/nico-perales/configdiff/commits/main
