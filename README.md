@@ -7,6 +7,9 @@
 (`.env`) by *value and structure*, not by text — so reordered keys and formatting
 differences never show up as changes, and the differences that matter stand out.
 
+**▶ Try it live in your browser:** https://nico-perales.github.io/configdiff-web/
+(runs via WebAssembly — nothing is uploaded)
+
 ```text
 $ configdiff old.toml new.yaml --array-key id
 ! port: integer 8080 -> string "8080"
