@@ -135,6 +135,53 @@ fn array_positional_compares_by_index() {
 }
 
 #[test]
+fn auto_matches_objects_by_inferred_key_without_config() {
+    // No --array-key given: the default strategy infers `name` and matches the
+    // reordered, edited element by it, reporting a field-level change.
+    let old = json(r#"{"s":[{"name":"web","image":"nginx:1.21"},{"name":"db","image":"pg:14"}]}"#);
+    let new = json(r#"{"s":[{"name":"db","image":"pg:15"},{"name":"web","image":"nginx:1.21"}]}"#);
+    let d = diff(&old, &new, &DiffOptions::default());
+    assert_eq!(d.len(), 1);
+    assert_eq!(d.changes()[0].path.to_string(), "s[1].image");
+    assert!(matches!(d.changes()[0].kind, ChangeKind::Changed { .. }));
+}
+
+#[test]
+fn auto_reports_added_and_removed_by_inferred_key() {
+    let old = json(r#"{"u":[{"id":"a"},{"id":"b"}]}"#);
+    let new = json(r#"{"u":[{"id":"a"},{"id":"c"}]}"#);
+    let d = diff(&old, &new, &DiffOptions::default());
+    let s = d.summary();
+    assert_eq!(s.removed, 1);
+    assert_eq!(s.added, 1);
+    assert_eq!(s.changed, 0);
+}
+
+#[test]
+fn auto_falls_back_to_lcs_without_an_identity_field() {
+    // Objects share only non-identity fields, so no key is inferred and the diff
+    // stays LCS: the reordered, edited element is a remove + add, never mis-keyed.
+    let old = json(r#"{"r":[{"type":"a","n":1},{"type":"b","n":2}]}"#);
+    let new = json(r#"{"r":[{"type":"b","n":9},{"type":"a","n":1}]}"#);
+    let d = diff(&old, &new, &DiffOptions::default());
+    let s = d.summary();
+    assert_eq!(s.added, 1);
+    assert_eq!(s.removed, 1);
+    assert_eq!(s.changed, 0);
+}
+
+#[test]
+fn auto_leaves_scalar_arrays_to_lcs() {
+    // Not arrays of objects: behaves exactly like LCS (one edited element).
+    let old = json(r#"{"a":[1,2,3]}"#);
+    let new = json(r#"{"a":[1,9,3]}"#);
+    let d = diff(&old, &new, &DiffOptions::default());
+    let s = d.summary();
+    assert_eq!(s.added, 1);
+    assert_eq!(s.removed, 1);
+}
+
+#[test]
 fn array_keyed_matches_reordered_objects_by_key() {
     let opts = DiffOptions::default()
         .array_strategy(ArrayStrategy::Keyed)

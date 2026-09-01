@@ -45,7 +45,7 @@ struct Cli {
     ignore: Vec<String>,
 
     /// Array diffing strategy.
-    #[arg(long = "array", value_enum, default_value_t = ArrayArg::Lcs)]
+    #[arg(long = "array", value_enum, default_value_t = ArrayArg::Auto)]
     array: ArrayArg,
 
     /// Key field for matching array-of-table elements (repeatable). Implies keyed.
@@ -133,6 +133,7 @@ enum ColorArg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ArrayArg {
+    Auto,
     Lcs,
     Positional,
     Keyed,
@@ -141,6 +142,7 @@ enum ArrayArg {
 impl From<ArrayArg> for ArrayStrategy {
     fn from(a: ArrayArg) -> Self {
         match a {
+            ArrayArg::Auto => ArrayStrategy::Auto,
             ArrayArg::Lcs => ArrayStrategy::Lcs,
             ArrayArg::Positional => ArrayStrategy::Positional,
             ArrayArg::Keyed => ArrayStrategy::Keyed,
@@ -212,7 +214,9 @@ fn should_fail(d: &configdiff::Diff, fail_on: &[FailKind]) -> bool {
 }
 
 fn build_options(cli: &Cli) -> Result<DiffOptions> {
-    let strategy = if !cli.array_key.is_empty() && cli.array == ArrayArg::Lcs {
+    // `--array-key` on its own implies keyed matching (the strategy is left at
+    // its default), so the user need not also pass `--array keyed`.
+    let strategy = if !cli.array_key.is_empty() && cli.array == ArrayArg::Auto {
         ArrayStrategy::Keyed
     } else {
         cli.array.into()

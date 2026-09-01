@@ -236,10 +236,71 @@ fn diff_arrays(
             if opts.array_keys.is_empty() {
                 diff_arrays_lcs(a, b, path, depth, opts, out);
             } else {
-                diff_arrays_keyed(a, b, path, depth, opts, out);
+                diff_arrays_by_key(a, b, &opts.array_keys, path, depth, opts, out);
             }
         }
+        ArrayStrategy::Auto => diff_arrays_auto(a, b, path, depth, opts, out),
     }
+}
+
+// Field names, in priority order, that usually identify an element in a config
+// list. Matched case-insensitively.
+const KEY_CANDIDATES: &[&str] = &[
+    "id", "name", "key", "slug", "uid", "uuid", "path", "host", "hostname", "username", "email",
+    "ip", "address",
+];
+
+// Default strategy: if both arrays are lists of objects that share an identity
+// field with unique values, match on it (so an edited element reports field-level
+// changes instead of a remove+add pair); otherwise diff by LCS.
+fn diff_arrays_auto(
+    a: &[Value],
+    b: &[Value],
+    path: &Path,
+    depth: usize,
+    opts: &DiffOptions,
+    out: &mut Vec<Change>,
+) {
+    match infer_array_key(a, b) {
+        Some(key) => diff_arrays_by_key(a, b, &[key], path, depth, opts, out),
+        None => diff_arrays_lcs(a, b, path, depth, opts, out),
+    }
+}
+
+fn infer_array_key(a: &[Value], b: &[Value]) -> Option<String> {
+    if a.is_empty() || b.is_empty() {
+        return None;
+    }
+    if !a.iter().all(|v| v.as_object().is_some()) || !b.iter().all(|v| v.as_object().is_some()) {
+        return None;
+    }
+    let sample = a[0].as_object()?;
+    for cand in KEY_CANDIDATES {
+        // Resolve the real-cased field name as it appears in the data.
+        let Some(field) = sample.keys().find(|k| k.eq_ignore_ascii_case(cand)) else {
+            continue;
+        };
+        if is_unique_scalar_key(a, field) && is_unique_scalar_key(b, field) {
+            return Some(field.clone());
+        }
+    }
+    None
+}
+
+// True if `key` is present on every element as a scalar with no duplicate values.
+fn is_unique_scalar_key(arr: &[Value], key: &str) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    for v in arr {
+        match v.as_object().and_then(|o| o.get(key)) {
+            Some(val) if val.is_scalar() => {
+                if !seen.insert(val.to_string()) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn diff_arrays_positional(
@@ -315,9 +376,10 @@ fn diff_arrays_lcs(
 }
 
 // Key-based array diff: matches object elements by a shared key field.
-fn diff_arrays_keyed(
+fn diff_arrays_by_key(
     a: &[Value],
     b: &[Value],
+    keys: &[String],
     path: &Path,
     depth: usize,
     opts: &DiffOptions,
@@ -326,11 +388,11 @@ fn diff_arrays_keyed(
     let mut new_by_key: Vec<(Value, usize, bool)> = b
         .iter()
         .enumerate()
-        .filter_map(|(idx, v)| key_of(v, &opts.array_keys).map(|k| (k, idx, false)))
+        .filter_map(|(idx, v)| key_of(v, keys).map(|k| (k, idx, false)))
         .collect();
 
     for (i, av) in a.iter().enumerate() {
-        match key_of(av, &opts.array_keys) {
+        match key_of(av, keys) {
             Some(akey) => {
                 let matched = new_by_key
                     .iter_mut()

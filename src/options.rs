@@ -6,7 +6,10 @@ use crate::error::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ArrayStrategy {
+    /// Match arrays of objects by an automatically inferred identity key (`id`,
+    /// `name`, …), falling back to `Lcs` when no such key fits. The default.
     #[default]
+    Auto,
     Lcs,
     Positional,
     Keyed,

@@ -37,8 +37,9 @@ became a string, a value dropped from a list — is buried in that noise.
   reported as a *type change* (`!`), not a value change. That class of bug —
   numbers that became strings — is exactly what text diff hides.
 - **Arrays diff intelligently.** Inserting one element into a list doesn't cascade
-  into "everything after it changed", and arrays of tables can be matched by a key
-  field so a reordered-and-edited entry shows only the field that actually changed.
+  into "everything after it changed". Lists of objects are matched by an identity
+  field **inferred automatically** (`id`, `name`, `host`, …), so a reordered-and-edited
+  entry shows only the field that actually changed — no configuration needed.
 
 ## Install
 
@@ -114,7 +115,7 @@ usually what you want.
 | `-o, --output <FMT>` | `pretty` (default) or `json`. |
 | `--color <WHEN>` | `auto` (default), `always`, or `never`. Honors `NO_COLOR`. |
 | `--ignore <GLOB>` | Ignore matching paths (repeatable). See below. |
-| `--array <STRATEGY>` | `lcs` (default), `positional`, or `keyed`. |
+| `--array <STRATEGY>` | `auto` (default), `lcs`, `positional`, or `keyed`. |
 | `--array-key <KEY>` | Key field for matching array elements (repeatable). Implies `--array keyed`. |
 | `--loose-numbers` | Treat `1` and `1.0` as equal. |
 | `--float-tolerance <EPS>` | Consider floats within `EPS` equal. |
@@ -148,7 +149,12 @@ and array indices are segments — the node at `server.hosts[2].name` is matched
 
 ### Array strategies
 
-- **`lcs`** (default) — longest-common-subsequence matching. Detects inserted and
+- **`auto`** (default) — for lists whose elements are all objects, infers an
+  identity field (`id`, `name`, `key`, `host`, … — the first that is present and
+  unique across the list) and matches on it, so a reordered-and-edited element
+  reports only the field that changed. Any other list, or one with no such field,
+  falls back to `lcs`. No configuration needed.
+- **`lcs`** — longest-common-subsequence matching. Detects inserted and
   removed elements without cascading. Best for scalar lists and lists where whole
   elements come and go. A scalar edited in place shows as a removal plus an
   addition (an LCS can't know it was an edit).

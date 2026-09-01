@@ -13,7 +13,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   model.
 - Cross-format comparison (e.g. TOML against YAML).
 - Type-aware diffing: distinguishes value changes from type changes.
-- Array diffing strategies: LCS (default), positional, and key-based matching.
+- Array diffing strategies: `auto` (default), LCS, positional, and key-based
+  matching. `auto` infers an identity field (`id`, `name`, `host`, …) for lists of
+  objects and matches on it, so a reordered-and-edited element reports only the
+  field that changed — with no `--array-key` configuration — and falls back to LCS
+  when no such field fits.
 - Ignore paths by glob, loose number comparison, and float tolerance.
 - `--expand` to report each leaf of an added/removed subtree individually.
 - `--fail-on <kind>` to gate the exit code on specific change kinds (for CI drift
